@@ -1,0 +1,26 @@
+{
+ "name": "유성현황 — 오늘 밤 별·유성 보기",
+ "short_name": "유성현황",
+ "description": "오늘 밤 어디서 몇 시에 유성을 볼 수 있는지 알려줍니다. 구름·달·빛공해까지 반영.",
+ "start_url": "./",
+ "scope": "./",
+ "display": "standalone",
+ "orientation": "portrait",
+ "background_color": "#0b1020",
+ "theme_color": "#0b1020",
+ "lang": "ko",
+ "icons": [
+  {
+   "src": "icon-192.png",
+   "sizes": "192x192",
+   "type": "image/png",
+   "purpose": "any"
+  },
+  {
+   "src": "icon-512.png",
+   "sizes": "512x512",
+   "type": "image/png",
+   "purpose": "any"
+  }
+ ]
+}

@@ -903,7 +903,12 @@ def build_html(meteors, flux_imgs, gen_time, fragment=False):
             f'<meta property="og:locale" content="ko_KR">'
             f'<meta property="og:title" content="🌠 유성현황 — 오늘 밤 어디서 몇 시에">'
             f'<meta property="og:description" content="{esc(og_desc)}">'
-            f'<meta name="description" content="{esc(og_desc)}">')
+            f'<meta property="og:image" content="https://jugika83.github.io/meteor/icon-512.png">'
+            f'<meta name="description" content="{esc(og_desc)}">'
+            f'<meta name="theme-color" content="#0b1020">'
+            f'<link rel="manifest" href="manifest.json">'
+            f'<link rel="icon" href="favicon.png" type="image/png">'
+            f'<link rel="apple-touch-icon" href="icon-192.png">')
     open_body = "" if fragment else "</head><body>"
     H = [f"""{head}
 <title>유성현황 — 오늘 밤 유성 보기</title><style>{css}</style>{open_body}<div class="wrap">
