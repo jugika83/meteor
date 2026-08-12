@@ -23,7 +23,7 @@
 ※ GMN '궤도' 데이터는 여러 나라 카메라를 대조해 계산하므로 관측 후 2~3일 지연된다.
    진짜 초 단위 실시간은 전파관측(2단계)·자체 카메라(3단계)에서 붙일 것.
 """
-import os, sys, math, base64, datetime, re, urllib.parse
+import os, sys, math, json, base64, datetime, re, urllib.parse
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -188,6 +188,12 @@ SITES = [
     ("홍천 살둔마을", 37.780, 128.320, "강원 산간"),
     ("강화 석모도", 37.700, 126.350, "서해 수평선"),
     ("제주 1100고지", 33.360, 126.470, "한라산 중산간"),
+    ("제주 사려니숲길", 33.417, 126.638, "중산간 숲길"),
+    ("제주 성산일출봉", 33.458, 126.942, "동쪽 바다 수평선"),
+    ("제주 송악산", 33.199, 126.290, "남서쪽 해안"),
+    ("논산 대둔산", 36.135, 127.330, "충청권에서 가장 가까운 산간"),
+    ("보은 속리산 말티재", 36.520, 127.820, "충북 고갯길"),
+    ("서산 간월도", 36.635, 126.363, "서해 수평선"),
 ]
 
 
@@ -550,6 +556,125 @@ def esc(s):
     return (str(s).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
 
 
+# 사이트에서 고를 수 있는 도시 (이름, 위도, 경도)
+PICK_CITIES = [
+    ("서울", 37.5665, 126.9780), ("대전", 36.3504, 127.3845),
+    ("대구", 35.8714, 128.6014), ("부산", 35.1800, 129.0750),
+    ("제주", 33.4996, 126.5312),
+]
+
+
+def city_report(place, lat, lon, stats, today):
+    """도시 하나의 오늘 밤 예보 + 관측지 추천을 통째로 계산해 dict로.
+    브라우저에서 도시를 바꿔 누르면 이 dict를 그대로 그린다."""
+    ni = night_info(today, lat, lon)
+    lm = limiting_mag(light_index(lat, lon))
+    hhmm = lambda t: t.astimezone(KST).strftime("%H:%M") if t else "—"
+    base = datetime.datetime.combine(today, datetime.time(19, 0), tzinfo=KST)
+
+    showers = []
+    for s in stats:
+        hours = []
+        for i in range(11):                              # 19시 ~ 05시
+            t = base + datetime.timedelta(hours=i)
+            j = jd(t)
+            alt = altitude(s["ra"], s["dec"], j, lat, lon)
+            dark = altitude(*sun_radec(j)[:2], j, lat, lon) < -18
+            moon_up = ni["moon_alt"](t) > 0
+            hr = None
+            if s["zhr"] and dark:                        # 박명 중엔 사실상 관측 불가
+                hr = round(hourly_rate(s["zhr"], s["r"], alt, lm) * (0.6 if moon_up else 1.0), 1)
+            hours.append({"h": t.strftime("%H시"), "alt": round(alt, 1), "dark": dark,
+                          "moon": moon_up, "hr": hr,
+                          "eff": round(max(0.0, math.sin(math.radians(alt))), 3)})
+        bi = max(range(11), key=lambda i: (hours[i]["dark"],
+                                           hours[i]["eff"] * (0.55 if hours[i]["moon"] else 1.0)))
+        bt = base + datetime.timedelta(hours=bi)
+        showers.append({
+            "name": s["name"], "color": s["color"], "n": s["n"], "peak": s["peak"],
+            "v": round(s["v"]), "ra": round(s["ra"]), "dec": round(s["dec"]),
+            "zhr": s["zhr"], "hours": hours,
+            "best": {"h": hours[bi]["h"], "alt": round(hours[bi]["alt"]),
+                     "eff": round(hours[bi]["eff"] * 100), "moon": hours[bi]["moon"],
+                     "hr": hours[bi]["hr"],
+                     "dir": compass(azimuth(s["ra"], s["dec"], jd(bt), lat, lon))},
+        })
+
+    # ── 어디로 가면 잘 보이나 ──
+    spots = None
+    if showers:
+        s0, g0 = showers[0], stats[0]
+        bi = [h["h"] for h in s0["hours"]].index(s0["best"]["h"])
+        bt = base + datetime.timedelta(hours=bi)
+        moon_f = 0.6 if s0["best"]["moon"] else 1.0
+        zhr, rr = (g0["zhr"], g0["r"]) if g0["zhr"] else (100, 2.2)
+        home_hr = hourly_rate(zhr, rr, s0["best"]["alt"], lm) * moon_f
+
+        cand = []
+        for name, sl, sn, desc in SITES:
+            d = haversine(lat, lon, sl, sn)
+            if d > 150:                                  # 당일 왕복 가능한 범위만
+                continue
+            slm = limiting_mag(light_index(sl, sn))
+            hr = hourly_rate(zhr, rr, altitude(g0["ra"], g0["dec"], jd(bt), sl, sn), slm) * moon_f
+            cand.append({"name": name, "desc": desc, "d": round(d), "lm": round(slm, 1),
+                         "hr": round(hr), "dir": compass(bearing(lat, lon, sl, sn)),
+                         "bortle": bortle(slm),
+                         "gain": round(hr / home_hr, 1) if home_hr > 0 else 0})
+        cand.sort(key=lambda c: -c["hr"])
+        near = [c for c in cand if c["d"] <= 60][:3] or cand[:1]
+        far = [c for c in cand if c not in near][:5]
+
+        worth = ""
+        if near and cand and near[0]["hr"] > 0:
+            extra = cand[0]["hr"] / near[0]["hr"]
+            worth = ("가까운 곳과 먼 곳 차이가 크지 않으니 <b>가까운 데서 오래 보는 편</b>이 낫습니다."
+                     if extra < 1.25 else
+                     f"멀리 가면 {extra:.1f}배 더 보입니다 — 시간이 되면 나갈 값어치가 있습니다.")
+
+        dk_txt = ""
+        dk = darkest_nearby(lat, lon, 120)
+        if dk:
+            dlat, dlon, didx, dd = dk
+            nearest = min(SITES, key=lambda s: haversine(dlat, dlon, s[1], s[2]))
+            nd = haversine(dlat, dlon, nearest[1], nearest[2])
+            where = (f"{nearest[0]} 부근" if nd < 20
+                     else f"{compass(bearing(lat, lon, dlat, dlon))}쪽 산간")
+            dk_txt = (f"반경 120km 안에서 계산상 가장 어두운 지점은 <b>{esc(where)}</b> "
+                      f"({dlat:.2f}, {dlon:.2f}) — {esc(place)}에서 {dd:.0f}km, "
+                      f"예상 한계등급 {limiting_mag(didx):.1f}등급.")
+
+        spots = {"homeHr": round(home_hr), "homeLm": round(lm, 1), "homeBortle": bortle(lm),
+                 "near": near, "far": far, "best": cand[0] if cand else None,
+                 "worth": worth, "darkest": dk_txt, "dir": s0["best"]["dir"]}
+
+    # ── 한 줄 요약 ──
+    moon_pct = ni["illum"] * 100
+    moon_txt = ("달 없음 — 최고 조건" if moon_pct < 15 else "달빛 약간" if moon_pct < 40 else
+                "달빛 방해 있음" if moon_pct < 70 else "달이 밝아 불리")
+    if showers:
+        dp = showers[0]["peak"]
+        when = ("오늘이 극대일" if dp == 0 else f"극대 {dp}일 전" if dp and 0 < dp <= 5 else
+                f"극대 {-dp}일 지남" if dp and -5 <= dp < 0 else "활동 중")
+        verdict = ("최고 조건" if moon_pct < 15 and dp is not None and abs(dp) <= 1 else
+                   "볼 만함" if moon_pct < 40 else "달빛 때문에 아쉬움")
+        banner = {"title": f"{showers[0]['name']} 유성우 · {when}",
+                  "sub": (f"달 밝기 {moon_pct:.0f}% · 추천 {showers[0]['best']['h']}쯤 "
+                          f"{showers[0]['best']['dir']}쪽 하늘 — <b>{verdict}</b>")}
+    else:
+        banner = {"title": "지금은 큰 유성우가 없습니다",
+                  "sub": f"산발유성 위주입니다. 달 밝기 {moon_pct:.0f}%."}
+
+    return {
+        "place": place, "lat": lat, "lon": lon,
+        "night": {"sunset": hhmm(ni["sunset"]), "dusk": hhmm(ni["dusk"]),
+                  "dawn": hhmm(ni["dawn"]), "moonrise": hhmm(ni["moonrise"]),
+                  "moonset": hhmm(ni["moonset"]), "illum": round(moon_pct),
+                  "moontext": moon_txt},
+        "banner": banner, "showers": showers, "spots": spots,
+    }
+
+
 def build_html(meteors, flux_imgs, gen_time, fragment=False):
     """fragment=True 면 <html>·<head> 껍데기 없이 본문만 — 웹에 올릴 때(아티팩트 등) 쓴다."""
     import collections
@@ -566,43 +691,31 @@ def build_html(meteors, flux_imgs, gen_time, fragment=False):
     today = gen_time.astimezone(KST).date()
     if gen_time.astimezone(KST).hour < 12:          # 새벽에 돌리면 '어젯밤'이 오늘 밤
         today = today - datetime.timedelta(days=1)
-    ni = night_info(today, LAT, LON)
-
-    # 관측 대상: 검출 30건 이상인 유성우 (복사점은 최근 관측 중앙값)
+    # 유성우별 복사점·속도는 도시와 무관하므로 한 번만 구한다
     import statistics
-    idx_home = light_index(LAT, LON)
-    lm_home = limiting_mag(idx_home)
-    guide = []
-    for code in ranked[:3]:                          # 상위 3개만 (나머지는 ④ 표에서)
+    stats = []
+    for code in ranked[:3]:                          # 상위 3개만 (나머지는 ⑤ 표에서)
         ms = [m for m in meteors if m["shower"] == code]
         if len(ms) < 100:
             continue
-        ra = statistics.median(m["ra"] for m in ms)
-        dec = statistics.median(m["dec"] for m in ms)
-        v = statistics.median(m["v"] for m in ms)
         zhr, rr = SHOWER_ZHR.get(code, (None, None))
-        hours = []
-        t = datetime.datetime.combine(today, datetime.time(19, 0), tzinfo=KST)
-        for _ in range(11):                          # 19시 ~ 05시
-            j = jd(t)
-            alt = altitude(ra, dec, j, LAT, LON)
-            dark = altitude(*sun_radec(j)[:2], j, LAT, LON) < -18
-            moon_up = ni["moon_alt"](t) > 0
-            hr = None
-            if zhr and dark:                          # 박명 중엔 사실상 관측 불가
-                hr = hourly_rate(zhr, rr, alt, lm_home) * (0.6 if moon_up else 1.0)
-            hours.append({"t": t, "alt": alt, "dark": dark, "moon": moon_up, "hr": hr,
-                          "eff": max(0.0, math.sin(math.radians(alt)))})
-            t += datetime.timedelta(hours=1)
-        best = max(hours, key=lambda h: (h["dark"], h["eff"] * (0.55 if h["moon"] else 1.0)))
-        guide.append({"code": code, "n": len(ms), "ra": ra, "dec": dec, "v": v,
-                      "hours": hours, "best": best, "peak": days_to_peak(code, today),
-                      "zhr": zhr, "r": rr,
-                      "az": azimuth(ra, dec, jd(best["t"]), LAT, LON)})
-    guide.sort(key=lambda g: -g["n"])
+        stats.append({"code": code, "name": shower_name(code), "color": color[code],
+                      "n": len(ms), "peak": days_to_peak(code, today),
+                      "ra": statistics.median(m["ra"] for m in ms),
+                      "dec": statistics.median(m["dec"] for m in ms),
+                      "v": statistics.median(m["v"] for m in ms), "zhr": zhr, "r": rr})
+    stats.sort(key=lambda s: -s["n"])
 
-    def hhmm(t):
-        return t.astimezone(KST).strftime("%H:%M") if t else "—"
+    # 고를 수 있는 도시 전부를 미리 계산해 페이지에 담는다 (클릭하면 즉시 전환)
+    picks = list(PICK_CITIES)
+    if PLACE not in [p[0] for p in picks]:           # 관측지.txt가 5개 밖이면 그것도 추가
+        picks.insert(0, (PLACE, LAT, LON))
+    reports = {}
+    for name, la, lo in picks:
+        print(f"  · {name} 계산 중...")
+        reports[name] = city_report(name, la, lo, stats, today)
+    default_city = PLACE if PLACE in reports else picks[0][0]
+    og_city = reports[default_city]
 
     # ── 지도 점 ──
     dots = []
@@ -657,181 +770,205 @@ def build_html(meteors, flux_imgs, gen_time, fragment=False):
     .warn{background:#2a1e12;border-color:#5a4020;color:#ffcf8f}
     svg text{font-size:11px}
     img.flux{width:100%;border-radius:8px;background:#fff}
+    /* 도시 고르기 */
+    .picker{background:#131a30;border:1px solid #33406e;border-radius:12px;padding:18px;margin:14px 0}
+    .picklbl{font-size:16px;font-weight:700;margin-bottom:12px}
+    .pickrow{display:flex;flex-wrap:wrap;gap:8px}
+    .pick{font:inherit;font-size:16px;font-weight:700;color:#cfd8ee;background:#1d2540;
+      border:1px solid #33406e;border-radius:99px;padding:10px 22px;cursor:pointer;
+      transition:background .12s,color .12s,border-color .12s}
+    .pick:hover{background:#26314f;color:#fff}
+    .pick:focus-visible{outline:2px solid #7cc4ff;outline-offset:2px}
+    .pick.on{background:#ffd166;border-color:#ffd166;color:#20160a}
+    .hint{color:#8b97b5;font-size:13px;margin-top:10px}
     """
 
-    # 카톡 등에 링크를 붙였을 때 보이는 미리보기 문구
-    og_desc = ""
-    if guide:
-        og_desc = (f"{shower_name(guide[0]['code'])} 유성우 · {PLACE} 기준 "
-                   f"{guide[0]['best']['t']:%H시} {compass(guide[0]['az'])}쪽 하늘이 가장 좋습니다")
+    # 카톡 등에 링크를 붙였을 때 보이는 미리보기 문구 (기본 도시 기준)
+    s0 = og_city["showers"][0] if og_city["showers"] else None
+    og_desc = (f"{s0['name']} 유성우 · 서울·대전·대구·부산·제주 중에서 고르면 "
+               f"그 지역에서 잘 보이는 장소와 시간을 알려드립니다") if s0 else \
+              "오늘 밤 유성 관측 예보 — 어디서 몇 시에 보면 되는지"
     head = ("" if fragment else
             '<!doctype html><html lang="ko"><head><meta charset="utf-8">'
             '<meta name="viewport" content="width=device-width,initial-scale=1">'
             f'<meta property="og:type" content="website">'
             f'<meta property="og:locale" content="ko_KR">'
-            f'<meta property="og:title" content="🌠 유성현황 — {esc(PLACE)} 기준 오늘 밤 예보">'
+            f'<meta property="og:title" content="🌠 유성현황 — 오늘 밤 어디서 몇 시에">'
             f'<meta property="og:description" content="{esc(og_desc)}">'
             f'<meta name="description" content="{esc(og_desc)}">')
     open_body = "" if fragment else "</head><body>"
     H = [f"""{head}
-<title>유성현황 — {esc(PLACE)} 기준</title><style>{css}</style>{open_body}<div class="wrap">
+<title>유성현황 — 오늘 밤 유성 보기</title><style>{css}</style>{open_body}<div class="wrap">
 <h1>🌠 유성현황</h1>
-<div class="sub">생성 {gen_time.astimezone(KST):%Y-%m-%d %H:%M} KST · 관측지 {esc(PLACE)}
- ({LAT:.3f}, {LON:.3f}) · 데이터 <a href="{GMN_BASE}" target="_blank">Global Meteor Network</a> (CC BY 4.0)</div>
+<div class="sub">생성 {gen_time.astimezone(KST):%Y-%m-%d %H:%M} KST ·
+ 데이터 <a href="{GMN_BASE}" target="_blank">Global Meteor Network</a> (CC BY 4.0)</div>
 """]
 
     # 날짜가 지나면 스스로 알려주는 안내 (공유받은 친구가 며칠 뒤 열 수 있으므로)
     H.append(f'<div id="stale" data-night="{today:%Y-%m-%d}"></div>')
 
-    # 오늘 밤 한 줄 요약
-    moon_pct = ni["illum"] * 100
-    head = guide[0] if guide else None
-    if head:
-        dp = head["peak"]
-        when = ("오늘이 극대일" if dp == 0 else
-                f"극대 {dp}일 전" if dp and 0 < dp <= 5 else
-                f"극대 {-dp}일 지남" if dp and -5 <= dp < 0 else "활동 중")
-        verdict = ("최고 조건" if moon_pct < 15 and dp is not None and abs(dp) <= 1 else
-                   "볼 만함" if moon_pct < 40 else "달빛 때문에 아쉬움")
-        banner = (f"<b style='color:#ffd166;font-size:20px'>{esc(shower_name(head['code']))} 유성우 · {when}</b><br>"
-                  f"달 밝기 {moon_pct:.0f}% · 추천 {head['best']['t']:%H시}쯤 "
-                  f"{compass(head['az'])}쪽 하늘 — <b>{esc(verdict)}</b>")
-    else:
-        banner = (f"지금은 큰 유성우 없이 산발유성 위주입니다. 달 밝기 {moon_pct:.0f}%.")
-    H.append(f'<div class="card" style="border-color:#3d4a7a;background:#16203c">{banner}</div>')
+    # ── 도시 고르기 ──
+    H.append('<div class="picker"><div class="picklbl">📍 어디에서 보실 건가요?</div><div class="pickrow">')
+    for name, la, lo in picks:
+        H.append(f'<button type="button" class="pick" data-city="{esc(name)}">{esc(name)}</button>')
+    H.append('</div><div class="hint" id="pickhint">한 곳을 누르면 그 지역 기준으로 '
+             '오늘 밤 몇 시에 어디로 가면 잘 보이는지 알려드립니다.</div></div>')
 
-    moon_txt = ("달 없음 — 최고 조건" if moon_pct < 15 else
-                "달빛 약간" if moon_pct < 40 else
-                "달빛 방해 있음" if moon_pct < 70 else "달이 밝아 불리")
-    H.append(f"""<h2>① 오늘 밤 {esc(PLACE)} 관측 조건 · {today:%m월 %d일} 밤</h2>
-<div class="card"><div class="grid g4">
-  <div><div class="lbl">일몰</div><div class="big">{hhmm(ni['sunset'])}</div></div>
-  <div><div class="lbl">완전히 어두워짐(천문박명 끝)</div><div class="big">{hhmm(ni['dusk'])}</div></div>
-  <div><div class="lbl">새벽 밝아지기 시작</div><div class="big">{hhmm(ni['dawn'])}</div></div>
-  <div><div class="lbl">달 밝기 · {esc(moon_txt)}</div><div class="big">{moon_pct:.0f}%</div>
-       <div class="lbl">월출 {hhmm(ni['moonrise'])} · 월몰 {hhmm(ni['moonset'])}</div></div>
-</div></div>""")
+    # 도시별 내용이 그려질 자리
+    H.append(f'<div id="report" data-night-label="{today:%m월 %d일}" hidden></div>')
 
-    if guide:
-        for g in guide:
-            best = g["best"]
-            H.append(f"""<div class="card">
-<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px">
-  <div><span class="dot" style="background:{color[g['code']]}"></span>
-       <b style="font-size:17px">{esc(shower_name(g['code']))}</b>
-       {'<span class="chip" style="background:#5a3a12;color:#ffd166">극대 D'
-        + ('%+d' % -g['peak'] if g['peak'] else '-DAY') + '</span>' if g['peak'] is not None else ''}
-       <span class="chip">최근 {g['n']:,}개 검출</span>
-       <span class="chip">진입속도 {g['v']:.0f} km/s</span></div>
-  <div class="lbl">복사점 적경 {g['ra']:.0f}° 적위 {g['dec']:+.0f}°</div>
-</div>
-<div class="note">추천 시간 <b style="color:#ffd166">{best['t']:%H시}</b>
-  — 이때 복사점이 <b>{best['alt']:.0f}°</b> 높이({compass(g['az'])}쪽 하늘), 관측 효율 {best['eff']*100:.0f}%
-  {'· 달 떠 있음' if best['moon'] else ''}</div>
-<div style="margin-top:10px">""")
-            hrmax = max([h["hr"] or 0 for h in g["hours"]] + [1])
-            for h in g["hours"]:
-                use_hr = h["hr"] is not None
-                w = (h["hr"] / hrmax * 100) if use_hr else max(0, min(100, h["alt"] / 90 * 100))
-                cls = "hbar" + (" dark" if h["dark"] else "") + (" moon" if h["moon"] and h["dark"] else "")
-                right = (f"{h['hr']:.0f}개/시" if use_hr else
-                         ("박명" if not h["dark"] else f"{h['alt']:+.0f}°"))
-                H.append(f"""<div class="hr"><span class="lbl">{h['t']:%H시}</span>
-<span class="{cls}"><i style="width:{w:.0f}%"></i></span>
-<span class="lbl r">{right}{' 🌙' if h['moon'] else ''}</span></div>""")
-            if g["zhr"]:
-                H.append(f'<div class="note">막대 = <b>{esc(PLACE)}에서 눈으로 보일 시간당 개수</b> 예측 '
-                         f'(표준 활동량 ZHR {g["zhr"]} 기준, 이곳 한계등급 {lm_home:.1f}등급 반영). '
-                         f'박명 시간대는 관측 불가로 봅니다.</div>')
-            H.append("</div></div>")
-        H.append('<div class="note">파란 막대 = 하늘이 완전히 어두운 시간, 갈색 = 달이 떠 있어 손해 보는 시간, '
-                 '회색 = 아직 박명. 막대 길이는 복사점 고도(높을수록 많이 보임). '
-                 '복사점 위치는 최근 GMN 관측의 중앙값이라 실제와 몇 도 차이날 수 있습니다.</div>')
-    else:
-        H.append('<div class="card warn">지금은 검출량 30개 이상인 주요 유성우가 없습니다. '
-                 '산발유성만 시간당 몇 개 보이는 시기입니다.</div>')
+    # 도시별 계산 결과를 통째로 심어둔다 (클릭하면 즉시 전환, 인터넷 불필요)
+    payload = json.dumps(reports, ensure_ascii=False).replace("</", "<\\/")
+    H.append(f'<script id="citydata" type="application/json">{payload}</script>')
 
-    # ── ② 어디로 가면 잘 보이나 ──
-    if guide:
-        g0 = guide[0]
-        alt_best = g0["best"]["alt"]
-        moon_f = 0.6 if g0["best"]["moon"] else 1.0
-        zhr, rr = (g0["zhr"], g0["r"]) if g0["zhr"] else (100, 2.2)
-        home_hr = hourly_rate(zhr, rr, alt_best, lm_home) * moon_f
+    H.append("""
+<script>
+(function(){
+  var DATA, out = document.getElementById('report');
+  try { DATA = JSON.parse(document.getElementById('citydata').textContent); }
+  catch(e) { return; }
+  var KEY = 'meteor-city', NIGHT = out.dataset.nightLabel;
 
-        cand = []
-        for name, sl, sn, desc in SITES:
-            d = haversine(LAT, LON, sl, sn)
-            if d > 150:                                # 당일 왕복 가능한 범위만
-                continue
-            lm = limiting_mag(light_index(sl, sn))
-            alt_s = altitude(g0["ra"], g0["dec"], jd(g0["best"]["t"]), sl, sn)
-            hr = hourly_rate(zhr, rr, alt_s, lm) * moon_f
-            cand.append({"name": name, "desc": desc, "d": d, "lm": lm, "hr": hr,
-                         "dir": compass(bearing(LAT, LON, sl, sn)),
-                         "gain": hr / home_hr if home_hr > 0 else 0,
-                         "lat": sl, "lon": sn})
-        cand.sort(key=lambda c: -c["hr"])
-        if not cand:                                   # 후보가 아예 없으면(해외 등) 섹션 생략
-            guide[0]["nosite"] = True
-        near = sorted([c for c in cand if c["d"] <= 60], key=lambda c: -c["hr"])[:3] or cand[:1]
-        far = [c for c in cand if c not in near][:5]
-        # 멀리 갈 값어치가 있는지 한 줄로
-        worth = ""
-        if near and cand and near[0]["hr"] > 0:
-            extra = cand[0]["hr"] / near[0]["hr"]
-            worth = ("가까운 곳과 먼 곳 차이가 크지 않으니 <b>가까운 데서 오래 보는 편</b>이 낫습니다."
-                     if extra < 1.25 else
-                     f"멀리 가면 {extra:.1f}배 더 보입니다 — 시간이 되면 나갈 값어치가 있습니다.")
+  function esc(s){ var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+  function n0(v){ return Math.round(v); }
 
-        dk = darkest_nearby(LAT, LON, 120)
-        dk_txt = ""
-        if dk:
-            dlat, dlon, didx, dd = dk
-            dlm = limiting_mag(didx)
-            nearest = min(SITES, key=lambda s: haversine(dlat, dlon, s[1], s[2]))
-            nd = haversine(dlat, dlon, nearest[1], nearest[2])
-            where = f"{nearest[0]} 부근" if nd < 20 else f"{compass(bearing(LAT, LON, dlat, dlon))}쪽 산간"
-            dk_txt = (f"반경 120km 안에서 계산상 가장 어두운 지점은 <b>{esc(where)}</b> "
-                      f"({dlat:.2f}, {dlon:.2f}) — {esc(PLACE)}에서 {dd:.0f}km, "
-                      f"예상 한계등급 {dlm:.1f}등급.")
+  function bars(sh){
+    var max = 1;
+    sh.hours.forEach(function(h){ if (h.hr && h.hr > max) max = h.hr; });
+    return sh.hours.map(function(h){
+      var useHr = (h.hr !== null && h.hr !== undefined);
+      var w = useHr ? (h.hr / max * 100) : Math.max(0, Math.min(100, h.alt / 90 * 100));
+      var cls = 'hbar' + (h.dark ? ' dark' : '') + (h.moon && h.dark ? ' moon' : '');
+      var right = useHr ? (n0(h.hr) + '개/시')
+                        : (h.dark ? ((h.alt > 0 ? '+' : '') + n0(h.alt) + '\\u00b0') : '박명');
+      return '<div class="hr"><span class="lbl">' + h.h + '</span>' +
+             '<span class="' + cls + '"><i style="width:' + w.toFixed(0) + '%"></i></span>' +
+             '<span class="lbl r">' + right + (h.moon ? ' \\ud83c\\udf19' : '') + '</span></div>';
+    }).join('');
+  }
 
-        H.append(f"""<h2>② 어디로 가면 잘 보이나 — {esc(PLACE)} 기준</h2>
-<div class="card"><div class="grid g4">
-  <div><div class="lbl">지금 계신 곳({esc(PLACE)}) 하늘</div>
-       <div class="big">{home_hr:.0f}개<span style="font-size:15px">/시간</span></div>
-       <div class="lbl">한계등급 {lm_home:.1f} · 보틀 {esc(bortle(lm_home))}</div></div>
-  <div><div class="lbl">60km 이내 최선</div>
-       <div class="big">{near[0]['hr']:.0f}개<span style="font-size:15px">/시간</span></div>
-       <div class="lbl">{esc(near[0]['name'])} · {near[0]['d']:.0f}km</div></div>
-  <div><div class="lbl">150km 이내 최선</div>
-       <div class="big">{cand[0]['hr']:.0f}개<span style="font-size:15px">/시간</span></div>
-       <div class="lbl">{esc(cand[0]['name'])} · {cand[0]['d']:.0f}km</div></div>
-  <div><div class="lbl">보는 방향</div>
-       <div class="big">{esc(compass(g0['az']))}쪽</div>
-       <div class="lbl">{g0['best']['t']:%H시} 기준 고도 {alt_best:.0f}°</div></div>
-</div></div>
+  function showerCard(sh){
+    var peak = '';
+    if (sh.peak !== null && sh.peak !== undefined) {
+      var t = (sh.peak === 0) ? 'D-DAY' : (sh.peak > 0 ? 'D-' + sh.peak : 'D+' + (-sh.peak));
+      peak = '<span class="chip" style="background:#5a3a12;color:#ffd166">극대 ' + t + '</span>';
+    }
+    var b = sh.best;
+    var note = '<div class="note">추천 시간 <b style="color:#ffd166">' + b.h + '</b>' +
+      ' — 이때 복사점이 <b>' + b.alt + '\\u00b0</b> 높이(' + b.dir + '쪽 하늘), 관측 효율 ' + b.eff + '%' +
+      (b.moon ? ' \\u00b7 달 떠 있음' : '') + '</div>';
+    var foot = sh.zhr ? ('<div class="note">막대 = <b>눈으로 보일 시간당 개수</b> 예측 ' +
+      '(표준 활동량 ZHR ' + sh.zhr + ' 기준, 이 지역 빛공해 반영). 박명 시간대는 관측 불가로 봅니다.</div>') : '';
+    return '<div class="card">' +
+      '<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px">' +
+      '<div><span class="dot" style="background:' + sh.color + '"></span>' +
+      '<b style="font-size:17px">' + esc(sh.name) + '</b> ' + peak +
+      '<span class="chip">최근 ' + sh.n.toLocaleString() + '개 검출</span>' +
+      '<span class="chip">진입속도 ' + sh.v + ' km/s</span></div>' +
+      '<div class="lbl">복사점 적경 ' + sh.ra + '\\u00b0 적위 ' + (sh.dec >= 0 ? '+' : '') + sh.dec + '\\u00b0</div>' +
+      '</div>' + note + '<div style="margin-top:10px">' + bars(sh) + '</div>' + foot + '</div>';
+  }
 
-<div class="card"><table>
-<tr><th>관측지</th><th class="r">방향·거리</th><th class="r">예상 한계등급</th>
-    <th class="r">보틀</th><th class="r">예상 관측</th><th class="r">지금 위치 대비</th></tr>""")
-        for c in near + far:
-            hl = ' style="background:#16203c"' if c in near else ""
-            H.append(f"""<tr{hl}><td><b>{esc(c['name'])}</b><br>
-<span class="lbl">{esc(c['desc'])}</span></td>
-<td class="r">{esc(c['dir'])} {c['d']:.0f}km</td>
-<td class="r">{c['lm']:.1f}등급</td><td class="r"><span class="lbl">{esc(bortle(c['lm']))}</span></td>
-<td class="r" style="color:#ffd166"><b>{c['hr']:.0f}개/시</b></td>
-<td class="r">{c['gain']:.1f}배</td></tr>""")
-        H.append(f"""</table>
-<div class="note">{worth} {dk_txt}</div>
-<div class="note">계산 방식: 전국 주요 도시 인구·거리로 빛공해를 추정(Walker 법칙)해 한계등급을 내고,
- IMO 표준식 <b>시간당 개수 = ZHR × sin(복사점 고도) ÷ r<sup>(6.5−한계등급)</sup></b> 로 환산했습니다.
- 달이 떠 있는 시간대는 0.6배로 깎았습니다. 실제 관측은 구름·산지 지형·주변 가로등에 더 좌우되니
- <b>순위 참고용</b>으로 보시고, {esc(compass(g0['az']))}쪽 지평선이 트인 자리를 고르세요.</div>
-<div class="note">복사점이 {esc(compass(g0['az']))}쪽에 있어도 유성은 하늘 전체에 흐릅니다.
- 복사점에서 30~50° 떨어진 하늘을 넓게 보는 게 가장 많이 잡힙니다. 누워서 하늘 전체를 보세요.</div>
-</div>""")
+  function spotRow(c, hi){
+    return '<tr' + (hi ? ' style="background:#16203c"' : '') + '>' +
+      '<td><b>' + esc(c.name) + '</b><br><span class="lbl">' + esc(c.desc) + '</span></td>' +
+      '<td class="r">' + c.dir + ' ' + c.d + 'km</td>' +
+      '<td class="r">' + c.lm.toFixed(1) + '등급</td>' +
+      '<td class="r"><span class="lbl">' + esc(c.bortle) + '</span></td>' +
+      '<td class="r" style="color:#ffd166"><b>' + c.hr + '개/시</b></td>' +
+      '<td class="r">' + c.gain.toFixed(1) + '배</td></tr>';
+  }
+
+  function render(city){
+    var d = DATA[city];
+    if (!d) return;
+    var h = [];
+
+    h.push('<div class="card" style="border-color:#3d4a7a;background:#16203c">' +
+      '<b style="color:#ffd166;font-size:20px">' + esc(d.banner.title) + '</b><br>' +
+      d.banner.sub + '</div>');
+
+    var nt = d.night;
+    h.push('<h2>\\u2460 오늘 밤 ' + esc(d.place) + ' 관측 조건 \\u00b7 ' + NIGHT + ' 밤</h2>' +
+      '<div class="card"><div class="grid g4">' +
+      '<div><div class="lbl">일몰</div><div class="big">' + nt.sunset + '</div></div>' +
+      '<div><div class="lbl">완전히 어두워짐(천문박명 끝)</div><div class="big">' + nt.dusk + '</div></div>' +
+      '<div><div class="lbl">새벽 밝아지기 시작</div><div class="big">' + nt.dawn + '</div></div>' +
+      '<div><div class="lbl">달 밝기 \\u00b7 ' + esc(nt.moontext) + '</div><div class="big">' + nt.illum + '%</div>' +
+      '<div class="lbl">월출 ' + nt.moonrise + ' \\u00b7 월몰 ' + nt.moonset + '</div></div>' +
+      '</div></div>');
+
+    if (d.showers.length) {
+      d.showers.forEach(function(sh){ h.push(showerCard(sh)); });
+      h.push('<div class="note">파란 막대 = 하늘이 완전히 어두운 시간, 갈색 = 달이 떠 있어 손해 보는 시간, ' +
+        '회색 = 아직 박명. 복사점 위치는 최근 관측의 중앙값이라 실제와 몇 도 차이날 수 있습니다.</div>');
+    } else {
+      h.push('<div class="card warn">지금은 큰 유성우가 없습니다. 산발유성만 시간당 몇 개 보이는 시기입니다.</div>');
+    }
+
+    var sp = d.spots;
+    if (sp) {
+      h.push('<h2>\\u2461 어디로 가면 잘 보이나 \\u2014 ' + esc(d.place) + ' 기준</h2>' +
+        '<div class="card"><div class="grid g4">' +
+        '<div><div class="lbl">지금 계신 곳(' + esc(d.place) + ') 하늘</div>' +
+        '<div class="big">' + sp.homeHr + '개<span style="font-size:15px">/시간</span></div>' +
+        '<div class="lbl">한계등급 ' + sp.homeLm.toFixed(1) + ' \\u00b7 보틀 ' + esc(sp.homeBortle) + '</div></div>' +
+        '<div><div class="lbl">' + (sp.near[0].d <= 60 ? '60km 이내 최선' : '가장 가까운 추천지') + '</div>' +
+        '<div class="big">' + sp.near[0].hr + '개<span style="font-size:15px">/시간</span></div>' +
+        '<div class="lbl">' + esc(sp.near[0].name) + ' \\u00b7 ' + sp.near[0].d + 'km</div></div>' +
+        (sp.best && sp.best.name !== sp.near[0].name ?
+        '<div><div class="lbl">더 멀리 나간다면</div>' +
+        '<div class="big">' + sp.best.hr + '개<span style="font-size:15px">/시간</span></div>' +
+        '<div class="lbl">' + esc(sp.best.name) + ' \\u00b7 ' + sp.best.d + 'km</div></div>' : '') +
+        '<div><div class="lbl">보는 방향</div><div class="big">' + sp.dir + '쪽</div>' +
+        '<div class="lbl">' + d.showers[0].best.h + ' 기준 고도 ' + d.showers[0].best.alt + '\\u00b0</div></div>' +
+        '</div></div>');
+
+      var rows = sp.near.map(function(c){ return spotRow(c, true); }).join('') +
+                 sp.far.map(function(c){ return spotRow(c, false); }).join('');
+      h.push('<div class="card"><table>' +
+        '<tr><th>관측지</th><th class="r">방향\\u00b7거리</th><th class="r">예상 한계등급</th>' +
+        '<th class="r">보틀</th><th class="r">예상 관측</th><th class="r">지금 위치 대비</th></tr>' +
+        rows + '</table>' +
+        '<div class="note">' + sp.worth + ' ' + sp.darkest + '</div>' +
+        '<div class="note">계산 방식: 전국 도시 인구\\u00b7거리로 빛공해를 추정해 한계등급을 내고, ' +
+        'IMO 표준식 <b>시간당 개수 = ZHR \\u00d7 sin(복사점 고도) \\u00f7 r<sup>(6.5\\u2212한계등급)</sup></b> 로 ' +
+        '환산했습니다. 구름\\u00b7지형은 반영하지 않으니 <b>순위 참고용</b>으로 보시고, ' +
+        sp.dir + '쪽 지평선이 트인 자리를 고르세요.</div>' +
+        '<div class="note">복사점이 ' + sp.dir + '쪽에 있어도 유성은 하늘 전체에 흐릅니다. ' +
+        '누워서 하늘을 넓게 보는 게 가장 많이 잡힙니다.</div></div>');
+    }
+
+    out.innerHTML = h.join('');
+    out.hidden = false;
+
+    var pin = document.getElementById('mepin'), lab = document.getElementById('melabel');
+    if (pin && lab) {
+      var x = (d.lon + 180) / 360 * 1000, y = (90 - d.lat) / 180 * 500;
+      pin.setAttribute('cx', x.toFixed(1)); pin.setAttribute('cy', y.toFixed(1));
+      lab.setAttribute('x', (x + 9).toFixed(1)); lab.setAttribute('y', (y + 4).toFixed(1));
+      lab.textContent = d.place;
+    }
+    var hint = document.getElementById('pickhint');
+    if (hint) hint.textContent = d.place + ' 기준으로 보고 있습니다. 다른 곳을 누르면 바로 바뀝니다.';
+    Array.prototype.forEach.call(document.querySelectorAll('.pick'), function(b){
+      b.classList.toggle('on', b.dataset.city === city);
+      b.setAttribute('aria-pressed', b.dataset.city === city ? 'true' : 'false');
+    });
+    document.title = '유성현황 \\u2014 ' + d.place + ' 기준';
+    try { localStorage.setItem(KEY, city); } catch(e) {}
+  }
+
+  Array.prototype.forEach.call(document.querySelectorAll('.pick'), function(b){
+    b.addEventListener('click', function(){ render(b.dataset.city); });
+  });
+
+  var saved = null;
+  try { saved = localStorage.getItem(KEY); } catch(e) {}
+  if (saved && DATA[saved]) render(saved);
+})();
+</script>
+""")
 
     # 세계지도
     lagtxt = (f"관측 시각 {t_from.astimezone(KST):%m/%d %H:%M} ~ {t_to.astimezone(KST):%m/%d %H:%M} KST "
@@ -841,8 +978,8 @@ def build_html(meteors, flux_imgs, gen_time, fragment=False):
 <svg viewBox="0 0 {MAP_W} {MAP_H}" style="width:100%;background:#0a1226;border-radius:8px">
   <path d="{land_paths()}" fill="#182444" stroke="#24345e" stroke-width="0.6"/>
   <g>{''.join(dots)}</g>
-  <circle cx="{sx:.1f}" cy="{sy:.1f}" r="5" fill="none" stroke="#ff4d6d" stroke-width="2"/>
-  <text x="{sx+9:.1f}" y="{sy+4:.1f}" fill="#ff8fa3">{esc(PLACE)}</text>
+  <circle id="mepin" cx="{sx:.1f}" cy="{sy:.1f}" r="5" fill="none" stroke="#ff4d6d" stroke-width="2"/>
+  <text id="melabel" x="{sx+9:.1f}" y="{sy+4:.1f}" fill="#ff8fa3">{esc(PLACE)}</text>
 </svg>
 <div class="note">점 하나 = 유성 하나가 빛나기 시작한 지점(대기권 약 100km). 큰 점일수록 밝은 유성.
  유럽·북미에 몰려 보이는 건 그쪽에 카메라가 많아서지, 유성이 거기만 떨어져서가 아닙니다.
