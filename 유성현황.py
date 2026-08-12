@@ -101,6 +101,60 @@ PEAK_DAY = {
 }
 
 
+# 연간 유성우 달력 — (코드, 이름, 극대 월, 일, 대략 ZHR, 한 줄 설명)
+CALENDAR = [
+    ("QUA", "사분의자리", 1, 3, 110, "새해 첫 대형 유성우. 극대가 몇 시간뿐이라 타이밍이 전부"),
+    ("LYR", "거문고자리", 4, 22, 18, "봄철 대표. 가끔 폭발적으로 늘기도"),
+    ("ETA", "물병자리 에타", 5, 6, 50, "핼리혜성 부스러기. 새벽에만 보임"),
+    ("SDA", "물병자리 델타 남부", 7, 30, 25, "한여름, 페르세우스 직전 워밍업"),
+    ("PER", "페르세우스자리", 8, 12, 100, "여름 최대 유성우. 밤새 보이고 밝은 것이 많음"),
+    ("KCG", "백조자리 카파", 8, 18, 3, "수는 적지만 느리고 밝은 화구가 특징"),
+    ("ORI", "오리온자리", 10, 21, 20, "핼리혜성 부스러기. 빠르고 흔적을 남김"),
+    ("STA", "황소자리 남부", 10, 10, 5, "느리고 아주 밝은 화구가 특기"),
+    ("NTA", "황소자리 북부", 11, 12, 5, "가을 화구 시즌"),
+    ("LEO", "사자자리", 11, 17, 15, "33년 주기로 대폭발. 평년엔 조용"),
+    ("GEM", "쌍둥이자리", 12, 14, 150, "연중 최대. 초저녁부터 밤새, 겨울이라 하늘도 맑음"),
+    ("URS", "작은곰자리", 12, 22, 10, "한 해 마지막. 북극 근처라 밤새 보임"),
+]
+
+
+def calendar_rows(today, n=4):
+    """오늘 이후 가까운 유성우 n개 — (이름, 날짜, D-day, ZHR, 설명)"""
+    out = []
+    for code, name, mo, da, zhr, note in CALENDAR:
+        for y in (today.year, today.year + 1):
+            try:
+                d = datetime.date(y, mo, da)
+            except ValueError:
+                continue
+            if (d - today).days >= -2:                   # 이틀 지난 것까지는 아직 진행 중으로
+                out.append({"name": name, "date": f"{mo}월 {da}일", "dday": (d - today).days,
+                            "zhr": zhr, "note": note, "year": y})
+                break
+    out.sort(key=lambda r: r["dday"])
+    return out[:n]
+
+
+def milkyway(today, lat, lon):
+    """은하수 중심(궁수자리 방향, 적경 266.4° 적위 -28.9°)이 잘 보이는 시간대.
+    고도 15° 이상이고 하늘이 어두운 시간을 찾는다."""
+    base = datetime.datetime.combine(today, datetime.time(19, 0), tzinfo=KST)
+    good = []
+    for i in range(11):
+        t = base + datetime.timedelta(hours=i)
+        j = jd(t)
+        alt = altitude(266.4, -28.9, j, lat, lon)
+        dark = altitude(*sun_radec(j)[:2], j, lat, lon) < -18
+        if alt >= 15 and dark:
+            good.append((t, alt))
+    if not good:
+        return None
+    best = max(good, key=lambda x: x[1])
+    return {"from": good[0][0].strftime("%H시"), "to": good[-1][0].strftime("%H시"),
+            "best": best[0].strftime("%H시"), "alt": round(best[1]),
+            "dir": compass(azimuth(266.4, -28.9, jd(best[0]), lat, lon))}
+
+
 def days_to_peak(code, today):
     """오늘 기준 극대까지 남은 날수(음수면 지난 것). 모르는 유성우면 None"""
     if code not in PEAK_DAY:
@@ -155,6 +209,54 @@ CITIES = [
     ("속초", 38.207, 128.591, 8), ("남원", 35.416, 127.390, 8),
     ("태백", 37.164, 128.986, 4), ("합천", 35.567, 128.166, 4),
     ("영양", 36.667, 129.113, 2), ("인제", 38.070, 128.170, 3),
+    # ── 시·군 단위 보강 (2026-08-13): 시골 지역이 실제보다 어둡게 나오던 문제 보정 ──
+    ("광명", 37.478, 126.865, 29), ("군포", 37.361, 126.935, 27),
+    ("하남", 37.539, 127.215, 33), ("광주경기", 37.429, 127.255, 39),
+    ("이천", 37.272, 127.435, 22), ("오산", 37.150, 127.077, 23),
+    ("양주", 37.785, 127.046, 26), ("구리", 37.594, 127.130, 19),
+    ("안성", 37.008, 127.280, 19), ("포천", 37.895, 127.200, 15),
+    ("의왕", 37.345, 126.968, 16), ("여주", 37.298, 127.637, 11),
+    ("양평", 37.492, 127.488, 12), ("가평", 37.831, 127.510, 6),
+    ("동두천", 37.904, 127.060, 9), ("과천", 37.429, 126.988, 8),
+    ("동해", 37.525, 129.114, 9), ("삼척", 37.450, 129.165, 6),
+    ("홍천", 37.697, 127.889, 7), ("횡성", 37.492, 127.985, 5),
+    ("평창", 37.371, 128.390, 4), ("영월", 37.184, 128.462, 4),
+    ("정선", 37.381, 128.661, 3), ("철원", 38.147, 127.313, 4),
+    ("양양", 38.075, 128.619, 3), ("고성강원", 38.380, 128.468, 3),
+    ("제천", 37.133, 128.191, 13), ("음성", 36.940, 127.690, 9),
+    ("진천", 36.855, 127.436, 8), ("옥천", 36.306, 127.571, 5),
+    ("영동", 36.175, 127.776, 4), ("괴산", 36.815, 127.787, 4),
+    ("단양", 36.985, 128.365, 3), ("보은", 36.489, 127.729, 3),
+    ("서산", 36.785, 126.450, 17), ("당진", 36.890, 126.646, 17),
+    ("논산", 36.187, 127.099, 12), ("공주", 36.447, 127.119, 10),
+    ("보령", 36.333, 126.613, 10), ("홍성", 36.601, 126.661, 10),
+    ("예산", 36.683, 126.845, 8), ("태안", 36.746, 126.298, 6),
+    ("서천", 36.080, 126.691, 5), ("부여", 36.276, 126.910, 6),
+    ("금산", 36.109, 127.488, 5), ("계룡", 36.274, 127.249, 4),
+    ("익산", 35.948, 126.958, 27), ("군산", 35.968, 126.737, 26),
+    ("완주", 35.905, 127.162, 9), ("김제", 35.804, 126.881, 8),
+    ("부안", 35.732, 126.733, 5), ("고창", 35.436, 126.702, 5),
+    ("무주", 36.007, 127.661, 2), ("임실", 35.618, 127.289, 3),
+    ("광양", 34.940, 127.696, 15), ("나주", 35.016, 126.711, 11),
+    ("무안", 34.990, 126.482, 9), ("화순", 35.064, 126.986, 6),
+    ("해남", 34.573, 126.599, 6), ("영광", 35.277, 126.512, 5),
+    ("고흥", 34.611, 127.285, 6), ("담양", 35.321, 126.988, 4),
+    ("영암", 34.800, 126.697, 5), ("완도", 34.311, 126.755, 5),
+    ("구례", 35.202, 127.463, 2), ("보성", 34.771, 127.080, 4),
+    ("경산", 35.825, 128.741, 26), ("김천", 36.140, 128.114, 14),
+    ("영천", 35.973, 128.939, 10), ("상주", 36.411, 128.159, 9),
+    ("문경", 36.587, 128.187, 7), ("칠곡", 35.996, 128.402, 11),
+    ("성주", 35.919, 128.283, 4), ("청도", 35.648, 128.734, 4),
+    ("영덕", 36.415, 129.366, 3), ("울진", 36.993, 129.400, 5),
+    ("봉화", 36.893, 128.732, 3), ("예천", 36.658, 128.453, 5),
+    ("의성", 36.353, 128.697, 5), ("청송", 36.436, 129.057, 2),
+    ("사천", 35.004, 128.064, 11), ("거창", 35.687, 127.910, 6),
+    ("창녕", 35.545, 128.492, 6), ("함안", 35.272, 128.406, 6),
+    ("남해", 34.838, 127.892, 4), ("하동", 35.067, 127.751, 4),
+    ("산청", 35.415, 127.874, 3), ("함양", 35.520, 127.725, 3),
+    ("고성경남", 34.973, 128.322, 5), ("의령", 35.322, 128.262, 2),
+    ("서귀포", 33.254, 126.560, 18), ("성산", 33.450, 126.916, 1),
+    ("한림", 33.412, 126.266, 2), ("표선", 33.326, 126.833, 1),
 ]
 
 # 관측지 후보 (이름, 위도, 경도, 설명) — 좌표는 대략값(±수 km), 광해 판정에는 영향 없음
@@ -177,7 +279,7 @@ SITES = [
     ("경주 토함산", 35.780, 129.343, "동해 일출 명소"),
     ("포항 호미곶", 36.076, 129.567, "동쪽 수평선"),
     ("무주 덕유산", 35.860, 127.750, "고지대 청정"),
-    ("영양 반딧불이공원", 36.660, 129.108, "아시아 최초 국제밤하늘보호공원"),
+    ("영양 반딧불이공원", 36.830, 129.170, "아시아 최초 국제밤하늘보호공원(수비면)"),
     ("봉화 청옥산", 36.960, 128.900, "백두대간 오지"),
     ("태백 매봉산", 37.170, 128.930, "고랭지 배추밭"),
     ("정선 만항재", 37.220, 128.900, "국내 최고도 포장 고갯길"),
@@ -619,7 +721,7 @@ def city_report(place, lat, lon, stats, today):
             hr = hourly_rate(zhr, rr, altitude(g0["ra"], g0["dec"], jd(bt), sl, sn), slm) * moon_f
             cand.append({"name": name, "desc": desc, "d": round(d), "lm": round(slm, 1),
                          "hr": round(hr), "dir": compass(bearing(lat, lon, sl, sn)),
-                         "bortle": bortle(slm),
+                         "bortle": bortle(slm), "lat": sl, "lon": sn,
                          "gain": round(hr / home_hr, 1) if home_hr > 0 else 0})
         cand.sort(key=lambda c: -c["hr"])
         near = [c for c in cand if c["d"] <= 60][:3] or cand[:1]
@@ -646,7 +748,12 @@ def city_report(place, lat, lon, stats, today):
 
         spots = {"homeHr": round(home_hr), "homeLm": round(lm, 1), "homeBortle": bortle(lm),
                  "near": near, "far": far, "best": cand[0] if cand else None,
-                 "worth": worth, "darkest": dk_txt, "dir": s0["best"]["dir"]}
+                 "worth": worth, "darkest": dk_txt, "dir": s0["best"]["dir"],
+                 # 날씨를 붙일 후보들 (브라우저가 이 좌표로 예보를 받아 온다)
+                 "wx": [{"name": "지금 계신 곳", "lat": lat, "lon": lon, "d": 0,
+                         "lm": round(lm, 1), "home": True}] +
+                       [{"name": c["name"], "lat": c["lat"], "lon": c["lon"], "d": c["d"],
+                         "lm": c["lm"], "home": False} for c in (near + far)]}
 
     # ── 한 줄 요약 ──
     moon_pct = ni["illum"] * 100
@@ -672,6 +779,7 @@ def city_report(place, lat, lon, stats, today):
                   "moonset": hhmm(ni["moonset"]), "illum": round(moon_pct),
                   "moontext": moon_txt},
         "banner": banner, "showers": showers, "spots": spots,
+        "milkyway": milkyway(today, lat, lon),
     }
 
 
@@ -820,14 +928,124 @@ def build_html(meteors, flux_imgs, gen_time, fragment=False):
     # 도시별 계산 결과를 통째로 심어둔다 (클릭하면 즉시 전환, 인터넷 불필요)
     payload = json.dumps(reports, ensure_ascii=False).replace("</", "<\\/")
     H.append(f'<script id="citydata" type="application/json">{payload}</script>')
+    cal = json.dumps(calendar_rows(today), ensure_ascii=False).replace("</", "<\\/")
+    H.append(f'<script id="caldata" type="application/json">{cal}</script>')
+    H.append("""
+<script>
+/* ── 오늘 밤 실제 하늘: 구름·미세먼지·습도를 받아 장소별 점수를 매긴다 ──
+   날씨는 시시각각 바뀌므로 페이지를 열 때마다 새로 받아온다.
+   출처: Open-Meteo (무료, 키 불필요) */
+(function(){
+  window.MeteorWx = {};
+  var CACHE = {};
+
+  function nightHours(){            // 오늘 밤 21시~다음날 04시 (한국시각)
+    var now = new Date();
+    var kst = new Date(now.getTime() + now.getTimezoneOffset()*60000 + 9*3600000);
+    var d = new Date(kst);
+    if (kst.getHours() < 12) d.setDate(d.getDate() - 1);   // 새벽이면 어젯밤이 '오늘 밤'
+    var ymd = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+    var nx = new Date(d.getTime() + 86400000);
+    var ymd2 = nx.getFullYear() + '-' + String(nx.getMonth()+1).padStart(2,'0') + '-' + String(nx.getDate()).padStart(2,'0');
+    var hs = [];
+    [21,22,23].forEach(function(h){ hs.push(ymd + 'T' + String(h).padStart(2,'0') + ':00'); });
+    [0,1,2,3,4].forEach(function(h){ hs.push(ymd2 + 'T' + String(h).padStart(2,'0') + ':00'); });
+    return hs;
+  }
+
+  function pick(times, values, want){
+    var out = [];
+    want.forEach(function(t){
+      var i = times.indexOf(t);
+      out.push(i >= 0 ? values[i] : null);
+    });
+    return out;
+  }
+
+  function avg(a){
+    var v = a.filter(function(x){ return x !== null && x !== undefined; });
+    if (!v.length) return null;
+    return v.reduce(function(s,x){ return s+x; },0) / v.length;
+  }
+
+  /* 오늘 밤 점수 0~100 — 구름이 압도적으로 중요하고, 그다음이 하늘 어둡기 */
+  function score(cloud, lm, pm10, dewGap){
+    if (cloud === null) return null;
+    var clear = Math.pow(1 - cloud/100, 1.3);                 // 구름 0%면 1, 50%면 0.41
+    var dark  = Math.max(0, Math.min(1, (lm - 3.8) / 2.8));   // 3.8등급 0, 6.6등급 1
+    var air   = pm10 === null ? 1 : Math.max(0.75, Math.min(1, 1 - (pm10 - 30) / 150));
+    return Math.round(100 * clear * (0.55 + 0.45*dark) * air);
+  }
+
+  function grade(s){
+    if (s === null) return {t:'—', c:'#7d8597'};
+    if (s >= 70) return {t:'최상', c:'#80ed99'};
+    if (s >= 50) return {t:'좋음', c:'#a7e34d'};
+    if (s >= 30) return {t:'보통', c:'#ffd166'};
+    if (s >= 15) return {t:'나쁨', c:'#ff9e6d'};
+    return {t:'관측 불가', c:'#ff6b6b'};
+  }
+
+  MeteorWx.load = function(sites){
+    var key = sites.map(function(s){ return s.lat+','+s.lon; }).join(';');
+    if (CACHE[key]) return Promise.resolve(CACHE[key]);
+    var lats = sites.map(function(s){ return s.lat; }).join(',');
+    var lons = sites.map(function(s){ return s.lon; }).join(',');
+    var base = 'https://api.open-meteo.com/v1/forecast?latitude=' + lats + '&longitude=' + lons +
+      '&hourly=cloud_cover,relative_humidity_2m,dew_point_2m,temperature_2m,wind_speed_10m' +
+      '&timezone=Asia%2FSeoul&forecast_days=2&past_days=1';   // 자정 넘어 봐도 초저녁 시간대가 나오도록
+    var air = 'https://air-quality-api.open-meteo.com/v1/air-quality?latitude=' + lats + '&longitude=' + lons +
+      '&hourly=pm10&timezone=Asia%2FSeoul&forecast_days=2&past_days=1';
+    var want = nightHours();
+
+    return Promise.all([
+      fetch(base).then(function(r){ return r.json(); }),
+      fetch(air).then(function(r){ return r.json(); }).catch(function(){ return null; })
+    ]).then(function(res){
+      var w = res[0], a = res[1];
+      if (!Array.isArray(w)) w = [w];
+      if (a && !Array.isArray(a)) a = [a];
+      var out = sites.map(function(s, i){
+        var h = (w[i] || {}).hourly;
+        if (!h) return Object.assign({}, s, {score: null});
+        var cloud = pick(h.time, h.cloud_cover, want);
+        var hum   = pick(h.time, h.relative_humidity_2m, want);
+        var temp  = pick(h.time, h.temperature_2m, want);
+        var dew   = pick(h.time, h.dew_point_2m, want);
+        var pm    = (a && a[i] && a[i].hourly) ? avg(pick(a[i].hourly.time, a[i].hourly.pm10, want)) : null;
+        var cAvg = avg(cloud);
+        var gap = null;
+        var tv = temp.filter(function(x){return x!==null;}), dv = dew.filter(function(x){return x!==null;});
+        if (tv.length && dv.length) gap = avg(tv) - avg(dv);
+        return Object.assign({}, s, {
+          cloud: cAvg === null ? null : Math.round(cAvg),
+          cloudHours: cloud,
+          hum: avg(hum) === null ? null : Math.round(avg(hum)),
+          pm10: pm === null ? null : Math.round(pm),
+          dewGap: gap === null ? null : Math.round(gap*10)/10,
+          score: score(cAvg, s.lm, pm === null ? null : Math.round(pm), gap)
+        });
+      });
+      CACHE[key] = out;
+      return out;
+    });
+  };
+
+  MeteorWx.grade = grade;
+  MeteorWx.hourLabels = ['21','22','23','00','01','02','03','04'];
+})();
+</script>
+""")
 
     H.append("""
 <script>
 (function(){
-  var DATA, out = document.getElementById('report');
-  try { DATA = JSON.parse(document.getElementById('citydata').textContent); }
-  catch(e) { return; }
-  var KEY = 'meteor-city', NIGHT = out.dataset.nightLabel;
+  var DATA, CAL, out = document.getElementById('report');
+  try {
+    DATA = JSON.parse(document.getElementById('citydata').textContent);
+    CAL  = JSON.parse(document.getElementById('caldata').textContent);
+  } catch(e) { return; }
+  var KEY = 'meteor-city', NIGHT = out.dataset.nightLabel, CUR = null;
 
   function esc(s){ var d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
   function n0(v){ return Math.round(v); }
@@ -840,10 +1058,10 @@ def build_html(meteors, flux_imgs, gen_time, fragment=False):
       var w = useHr ? (h.hr / max * 100) : Math.max(0, Math.min(100, h.alt / 90 * 100));
       var cls = 'hbar' + (h.dark ? ' dark' : '') + (h.moon && h.dark ? ' moon' : '');
       var right = useHr ? (n0(h.hr) + '개/시')
-                        : (h.dark ? ((h.alt > 0 ? '+' : '') + n0(h.alt) + '\\u00b0') : '박명');
+                        : (h.dark ? ((h.alt > 0 ? '+' : '') + n0(h.alt) + '°') : '박명');
       return '<div class="hr"><span class="lbl">' + h.h + '</span>' +
              '<span class="' + cls + '"><i style="width:' + w.toFixed(0) + '%"></i></span>' +
-             '<span class="lbl r">' + right + (h.moon ? ' \\ud83c\\udf19' : '') + '</span></div>';
+             '<span class="lbl r">' + right + (h.moon ? ' 🌙' : '') + '</span></div>';
     }).join('');
   }
 
@@ -855,17 +1073,17 @@ def build_html(meteors, flux_imgs, gen_time, fragment=False):
     }
     var b = sh.best;
     var note = '<div class="note">추천 시간 <b style="color:#ffd166">' + b.h + '</b>' +
-      ' — 이때 복사점이 <b>' + b.alt + '\\u00b0</b> 높이(' + b.dir + '쪽 하늘), 관측 효율 ' + b.eff + '%' +
-      (b.moon ? ' \\u00b7 달 떠 있음' : '') + '</div>';
-    var foot = sh.zhr ? ('<div class="note">막대 = <b>눈으로 보일 시간당 개수</b> 예측 ' +
-      '(표준 활동량 ZHR ' + sh.zhr + ' 기준, 이 지역 빛공해 반영). 박명 시간대는 관측 불가로 봅니다.</div>') : '';
+      ' — 이때 복사점이 <b>' + b.alt + '°</b> 높이(' + b.dir + '쪽 하늘), 관측 효율 ' + b.eff + '%' +
+      (b.moon ? ' · 달 떠 있음' : '') + '</div>';
+    var foot = sh.zhr ? ('<div class="note">막대 = <b>구름이 없다고 볼 때 눈으로 보일 시간당 개수</b> ' +
+      '(표준 활동량 ZHR ' + sh.zhr + ' 기준, 이 지역 빛공해 반영). 실제로는 위의 구름 예보를 함께 보세요.</div>') : '';
     return '<div class="card">' +
       '<div style="display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:8px">' +
       '<div><span class="dot" style="background:' + sh.color + '"></span>' +
       '<b style="font-size:17px">' + esc(sh.name) + '</b> ' + peak +
       '<span class="chip">최근 ' + sh.n.toLocaleString() + '개 검출</span>' +
       '<span class="chip">진입속도 ' + sh.v + ' km/s</span></div>' +
-      '<div class="lbl">복사점 적경 ' + sh.ra + '\\u00b0 적위 ' + (sh.dec >= 0 ? '+' : '') + sh.dec + '\\u00b0</div>' +
+      '<div class="lbl">복사점 적경 ' + sh.ra + '° 적위 ' + (sh.dec >= 0 ? '+' : '') + sh.dec + '°</div>' +
       '</div>' + note + '<div style="margin-top:10px">' + bars(sh) + '</div>' + foot + '</div>';
   }
 
@@ -879,24 +1097,152 @@ def build_html(meteors, flux_imgs, gen_time, fragment=False):
       '<td class="r">' + c.gain.toFixed(1) + '배</td></tr>';
   }
 
+  /* ── 오늘 밤 실제 하늘(날씨) ── */
+  function wxSkeleton(){
+    return '<h2>① 오늘 밤 하늘 — 지금 예보 기준</h2>' +
+      '<div class="card" id="wxcard"><div class="lbl">구름·미세먼지 예보를 받아오는 중입니다...</div></div>';
+  }
+
+  function cloudBar(v){
+    if (v === null || v === undefined) return '<span class="hbar"></span>';
+    var col = v < 20 ? '#4cc9f0' : (v < 50 ? '#7cc4ff' : (v < 80 ? '#8a6f3a' : '#6b3a3a'));
+    return '<span class="hbar"><i style="width:' + v + '%;background:' + col + '"></i></span>';
+  }
+
+  function renderWx(list, place){
+    var card = document.getElementById('wxcard');
+    if (!card) return;
+    var ok = list.filter(function(s){ return s.score !== null; });
+    if (!ok.length) {
+      card.innerHTML = '<div class="lbl">날씨 예보를 불러오지 못했습니다. ' +
+        '인터넷 연결을 확인하시거나 잠시 뒤 새로고침해 주세요.</div>';
+      return;
+    }
+    var sorted = ok.slice().sort(function(a,b){ return b.score - a.score; });
+    var top = sorted[0], home = list.filter(function(s){ return s.home; })[0];
+    var near60 = sorted.filter(function(s){ return !s.home && s.d <= 60; })[0];
+    if (near60 && near60.name === top.name) near60 = null;   // 1등과 같으면 중복이라 안 보여준다
+    var g = window.MeteorWx.grade(top.score), gh = window.MeteorWx.grade(home ? home.score : null);
+
+    var h = [];
+    h.push('<div class="grid g4">' +
+      '<div><div class="lbl">오늘 밤 가장 좋은 곳</div>' +
+      '<div class="big" style="color:' + g.c + '">' + esc(top.home ? place : top.name) + '</div>' +
+      '<div class="lbl">' + (top.home ? '지금 계신 곳' : top.d + 'km · ' + '차로 나가야 함') + '</div></div>' +
+      '<div><div class="lbl">그곳의 하늘</div>' +
+      '<div class="big" style="color:' + g.c + '">' + g.t + '</div>' +
+      '<div class="lbl">100점 만점에 ' + top.score + '점</div></div>' +
+      (near60 ? '<div><div class="lbl">60km 이내 최선</div>' +
+      '<div class="big" style="color:' + window.MeteorWx.grade(near60.score).c + '">' +
+      esc(near60.name) + '</div>' +
+      '<div class="lbl">' + near60.d + 'km · ' + near60.score + '점 · 구름 ' + near60.cloud + '%</div></div>'
+      : '<div><div class="lbl">구름</div><div class="big">' + top.cloud + '%</div>' +
+      '<div class="lbl">21시~새벽 4시 평균</div></div>') +
+      '<div><div class="lbl">' + esc(place) + '에서 그냥 본다면</div>' +
+      '<div class="big" style="color:' + gh.c + '">' + gh.t + '</div>' +
+      '<div class="lbl">' + (home && home.score !== null ? home.score + '점 · 구름 ' + home.cloud + '%' : '—') + '</div></div>' +
+      '</div>');
+
+    // 시간대별 구름
+    var labels = window.MeteorWx.hourLabels;
+    h.push('<div style="margin-top:14px"><div class="lbl" style="margin-bottom:6px">' +
+      esc(top.home ? place : top.name) + ' 시간대별 구름</div>');
+    labels.forEach(function(lb, i){
+      var v = top.cloudHours ? top.cloudHours[i] : null;
+      h.push('<div class="hr"><span class="lbl">' + lb + '시</span>' + cloudBar(v) +
+        '<span class="lbl r">' + (v === null ? '—' : v + '%') + '</span></div>');
+    });
+    h.push('</div>');
+
+    // 장소별 표
+    h.push('<table style="margin-top:14px">' +
+      '<tr><th>장소</th><th class="r">거리</th><th class="r">구름</th><th class="r">미세먼지</th>' +
+      '<th class="r">하늘 어둡기</th><th class="r">종합</th></tr>');
+    sorted.forEach(function(s){
+      var sg = window.MeteorWx.grade(s.score);
+      h.push('<tr' + (s.home ? ' style="background:#16203c"' : '') + '>' +
+        '<td><b>' + esc(s.home ? place + ' (지금 계신 곳)' : s.name) + '</b></td>' +
+        '<td class="r">' + (s.home ? '—' : s.d + 'km') + '</td>' +
+        '<td class="r">' + (s.cloud === null ? '—' : s.cloud + '%') + '</td>' +
+        '<td class="r">' + (s.pm10 === null ? '—' : s.pm10 + 'µg') + '</td>' +
+        '<td class="r">' + s.lm.toFixed(1) + '등급</td>' +
+        '<td class="r"><b style="color:' + sg.c + '">' + s.score + '점 ' + sg.t + '</b></td></tr>');
+    });
+    h.push('</table>');
+
+    // 결로 경고
+    var dewWarn = sorted.filter(function(s){ return s.dewGap !== null && s.dewGap < 2; });
+    if (dewWarn.length) {
+      h.push('<div class="note" style="color:#ffcf8f">💧 기온과 이슬점 차이가 ' +
+        dewWarn[0].dewGap + '°C밖에 안 됩니다 — 렌즈·안경에 이슬이 맺히기 쉬운 밤입니다. ' +
+        '수건이나 김서림 방지 용품을 챙기세요.</div>');
+    }
+    h.push('<div class="note">종합 점수 = 구름(가장 큼) × 하늘 어둡기 × 미세먼지로 계산한 값입니다. ' +
+      '구름이 80%를 넘으면 아무리 어두운 곳도 소용없기 때문에 구름에 가장 큰 비중을 뒀습니다. ' +
+      '날씨 출처: <a href="https://open-meteo.com/" target="_blank">Open-Meteo</a> · ' +
+      '페이지를 열 때마다 새로 받아옵니다.</div>');
+    card.innerHTML = h.join('');
+  }
+
+  function loadWx(d){
+    if (!d.spots || !d.spots.wx || !window.MeteorWx) return;
+    var mine = CUR;
+    window.MeteorWx.load(d.spots.wx).then(function(list){
+      if (CUR !== mine) return;                 // 그새 다른 도시를 눌렀으면 무시
+      renderWx(list, d.place);
+    }).catch(function(){
+      var card = document.getElementById('wxcard');
+      if (card) card.innerHTML = '<div class="lbl">날씨 예보를 불러오지 못했습니다.</div>';
+    });
+  }
+
+  function milkyCard(mw){
+    if (!mw) return '';
+    return '<div class="card"><b style="font-size:17px">🌌 은하수</b>' +
+      '<div class="note">오늘 밤 <b style="color:#ffd166">' + mw.from + ' ~ ' + mw.to + '</b> 사이에 ' +
+      '은하수 중심(궁수자리 방향)이 지평선 위로 올라옵니다. ' +
+      '<b>' + mw.best + '</b>쯤 가장 높아지며(' + mw.alt + '°), ' + mw.dir + '쪽 하늘입니다. ' +
+      '달이 없고 도시 불빛에서 벗어나면 맨눈으로도 뿌연 띠가 보입니다.</div></div>';
+  }
+
+  function calCard(){
+    if (!CAL || !CAL.length) return '';
+    var rows = CAL.map(function(c){
+      var dd = c.dday === 0 ? '<b style="color:#ffd166">오늘</b>' :
+               (c.dday < 0 ? '진행 중' : 'D-' + c.dday);
+      return '<tr><td><b>' + esc(c.name) + '</b><br><span class="lbl">' + esc(c.note) + '</span></td>' +
+        '<td class="r">' + c.date + '</td><td class="r">' + dd + '</td>' +
+        '<td class="r">시간당 ' + c.zhr + '개</td></tr>';
+    }).join('');
+    return '<h2>④ 다음 유성우는 언제</h2><div class="card"><table>' +
+      '<tr><th>유성우</th><th class="r">극대일</th><th class="r">남은 날</th><th class="r">최대 활동량</th></tr>' +
+      rows + '</table><div class="note">최대 활동량은 하늘이 완벽할 때의 이론값(ZHR)입니다. ' +
+      '도시에서는 이보다 훨씬 적게 보이고, 달이 밝으면 더 줄어듭니다.</div></div>';
+  }
+
   function render(city){
     var d = DATA[city];
     if (!d) return;
+    CUR = city;
     var h = [];
 
     h.push('<div class="card" style="border-color:#3d4a7a;background:#16203c">' +
       '<b style="color:#ffd166;font-size:20px">' + esc(d.banner.title) + '</b><br>' +
       d.banner.sub + '</div>');
 
+    h.push(wxSkeleton());
+
     var nt = d.night;
-    h.push('<h2>\\u2460 오늘 밤 ' + esc(d.place) + ' 관측 조건 \\u00b7 ' + NIGHT + ' 밤</h2>' +
+    h.push('<h2>② 오늘 밤 ' + esc(d.place) + ' 하늘 시간표 · ' + NIGHT + ' 밤</h2>' +
       '<div class="card"><div class="grid g4">' +
       '<div><div class="lbl">일몰</div><div class="big">' + nt.sunset + '</div></div>' +
       '<div><div class="lbl">완전히 어두워짐(천문박명 끝)</div><div class="big">' + nt.dusk + '</div></div>' +
       '<div><div class="lbl">새벽 밝아지기 시작</div><div class="big">' + nt.dawn + '</div></div>' +
-      '<div><div class="lbl">달 밝기 \\u00b7 ' + esc(nt.moontext) + '</div><div class="big">' + nt.illum + '%</div>' +
-      '<div class="lbl">월출 ' + nt.moonrise + ' \\u00b7 월몰 ' + nt.moonset + '</div></div>' +
+      '<div><div class="lbl">달 밝기 · ' + esc(nt.moontext) + '</div><div class="big">' + nt.illum + '%</div>' +
+      '<div class="lbl">월출 ' + nt.moonrise + ' · 월몰 ' + nt.moonset + '</div></div>' +
       '</div></div>');
+
+    h.push(milkyCard(d.milkyway));
 
     if (d.showers.length) {
       d.showers.forEach(function(sh){ h.push(showerCard(sh)); });
@@ -908,39 +1254,41 @@ def build_html(meteors, flux_imgs, gen_time, fragment=False):
 
     var sp = d.spots;
     if (sp) {
-      h.push('<h2>\\u2461 어디로 가면 잘 보이나 \\u2014 ' + esc(d.place) + ' 기준</h2>' +
+      h.push('<h2>③ 어디로 가면 어두운가 — ' + esc(d.place) + ' 기준</h2>' +
         '<div class="card"><div class="grid g4">' +
         '<div><div class="lbl">지금 계신 곳(' + esc(d.place) + ') 하늘</div>' +
         '<div class="big">' + sp.homeHr + '개<span style="font-size:15px">/시간</span></div>' +
-        '<div class="lbl">한계등급 ' + sp.homeLm.toFixed(1) + ' \\u00b7 보틀 ' + esc(sp.homeBortle) + '</div></div>' +
+        '<div class="lbl">한계등급 ' + sp.homeLm.toFixed(1) + ' · 보틀 ' + esc(sp.homeBortle) + '</div></div>' +
         '<div><div class="lbl">' + (sp.near[0].d <= 60 ? '60km 이내 최선' : '가장 가까운 추천지') + '</div>' +
         '<div class="big">' + sp.near[0].hr + '개<span style="font-size:15px">/시간</span></div>' +
-        '<div class="lbl">' + esc(sp.near[0].name) + ' \\u00b7 ' + sp.near[0].d + 'km</div></div>' +
+        '<div class="lbl">' + esc(sp.near[0].name) + ' · ' + sp.near[0].d + 'km</div></div>' +
         (sp.best && sp.best.name !== sp.near[0].name ?
         '<div><div class="lbl">더 멀리 나간다면</div>' +
         '<div class="big">' + sp.best.hr + '개<span style="font-size:15px">/시간</span></div>' +
-        '<div class="lbl">' + esc(sp.best.name) + ' \\u00b7 ' + sp.best.d + 'km</div></div>' : '') +
+        '<div class="lbl">' + esc(sp.best.name) + ' · ' + sp.best.d + 'km</div></div>' : '') +
         '<div><div class="lbl">보는 방향</div><div class="big">' + sp.dir + '쪽</div>' +
-        '<div class="lbl">' + d.showers[0].best.h + ' 기준 고도 ' + d.showers[0].best.alt + '\\u00b0</div></div>' +
+        '<div class="lbl">' + d.showers[0].best.h + ' 기준 고도 ' + d.showers[0].best.alt + '°</div></div>' +
         '</div></div>');
 
       var rows = sp.near.map(function(c){ return spotRow(c, true); }).join('') +
                  sp.far.map(function(c){ return spotRow(c, false); }).join('');
       h.push('<div class="card"><table>' +
-        '<tr><th>관측지</th><th class="r">방향\\u00b7거리</th><th class="r">예상 한계등급</th>' +
+        '<tr><th>관측지</th><th class="r">방향·거리</th><th class="r">예상 한계등급</th>' +
         '<th class="r">보틀</th><th class="r">예상 관측</th><th class="r">지금 위치 대비</th></tr>' +
         rows + '</table>' +
         '<div class="note">' + sp.worth + ' ' + sp.darkest + '</div>' +
-        '<div class="note">계산 방식: 전국 도시 인구\\u00b7거리로 빛공해를 추정해 한계등급을 내고, ' +
-        'IMO 표준식 <b>시간당 개수 = ZHR \\u00d7 sin(복사점 고도) \\u00f7 r<sup>(6.5\\u2212한계등급)</sup></b> 로 ' +
-        '환산했습니다. 구름\\u00b7지형은 반영하지 않으니 <b>순위 참고용</b>으로 보시고, ' +
-        sp.dir + '쪽 지평선이 트인 자리를 고르세요.</div>' +
+        '<div class="note">이 표는 <b>구름을 뺀 순수 어둡기</b> 기준입니다. 오늘 밤 실제로 어디가 나은지는 ' +
+        '맨 위 ①번(구름 반영)을 보세요. 빛공해는 전국 시·군 인구와 거리로 추정한 값이라 ' +
+        '순위는 믿을 만하지만 절대 수치는 참고용입니다.</div>' +
         '<div class="note">복사점이 ' + sp.dir + '쪽에 있어도 유성은 하늘 전체에 흐릅니다. ' +
         '누워서 하늘을 넓게 보는 게 가장 많이 잡힙니다.</div></div>');
     }
 
+    h.push(calCard());
+
     out.innerHTML = h.join('');
     out.hidden = false;
+    loadWx(d);
 
     var pin = document.getElementById('mepin'), lab = document.getElementById('melabel');
     if (pin && lab) {
@@ -955,7 +1303,7 @@ def build_html(meteors, flux_imgs, gen_time, fragment=False):
       b.classList.toggle('on', b.dataset.city === city);
       b.setAttribute('aria-pressed', b.dataset.city === city ? 'true' : 'false');
     });
-    document.title = '유성현황 \\u2014 ' + d.place + ' 기준';
+    document.title = '유성현황 — ' + d.place + ' 기준';
     try { localStorage.setItem(KEY, city); } catch(e) {}
   }
 
@@ -973,7 +1321,7 @@ def build_html(meteors, flux_imgs, gen_time, fragment=False):
     # 세계지도
     lagtxt = (f"관측 시각 {t_from.astimezone(KST):%m/%d %H:%M} ~ {t_to.astimezone(KST):%m/%d %H:%M} KST "
               f"(약 {lag_h:.0f}시간 전까지)") if t_to else ""
-    H.append(f"""<h2>③ 최근 관측된 유성 {len(meteors):,}개 — 세계 지도</h2>
+    H.append(f"""<h2>⑤ 최근 관측된 유성 {len(meteors):,}개 — 세계 지도</h2>
 <div class="card"><div class="lbl" style="margin-bottom:8px">{lagtxt}</div>
 <svg viewBox="0 0 {MAP_W} {MAP_H}" style="width:100%;background:#0a1226;border-radius:8px">
   <path d="{land_paths()}" fill="#182444" stroke="#24345e" stroke-width="0.6"/>
@@ -991,7 +1339,7 @@ def build_html(meteors, flux_imgs, gen_time, fragment=False):
     H.append("</div></div>")
 
     # 시간대별
-    H.append("""<h2>④ 한국 시간대별 검출량</h2><div class="card">""")
+    H.append("""<h2>⑥ 한국 시간대별 검출량</h2><div class="card">""")
     for h in range(24):
         n = hourly.get(h, 0)
         H.append(f"""<div class="hr"><span class="lbl">{h:02d}시</span>
@@ -1001,7 +1349,7 @@ def build_html(meteors, flux_imgs, gen_time, fragment=False):
              '지구 자전으로 관측망이 밤을 통과하는 리듬입니다.</div></div>')
 
     # 유성우 순위
-    H.append("""<h2>⑤ 유성우별 순위</h2><div class="card"><table>
+    H.append("""<h2>⑦ 유성우별 순위</h2><div class="card"><table>
 <tr><th>유성우</th><th class="r">검출</th><th class="r">평균 속도</th><th class="r">가장 밝은 등급</th><th class="r">비중</th></tr>""")
     total = len(meteors)
     for c, n in counts.most_common(12):
@@ -1014,7 +1362,7 @@ def build_html(meteors, flux_imgs, gen_time, fragment=False):
     H.append("</table></div>")
 
     # 밝은 유성
-    H.append("""<h2>⑥ 가장 밝았던 유성 TOP 12</h2><div class="card"><table>
+    H.append("""<h2>⑧ 가장 밝았던 유성 TOP 12</h2><div class="card"><table>
 <tr><th>시각(KST)</th><th>유성우</th><th class="r">밝기</th><th class="r">속도</th>
 <th class="r">질량</th><th class="r">위치</th><th class="r">카메라</th></tr>""")
     for m in top:
@@ -1028,7 +1376,7 @@ def build_html(meteors, flux_imgs, gen_time, fragment=False):
 
     # 실시간 활동량
     if flux_imgs:
-        H.append("""<h2>⑦ 지금 활동량 (GMN 실시간 ZHR)</h2><div class="card">""")
+        H.append("""<h2>⑨ 지금 활동량 (GMN 실시간 ZHR)</h2><div class="card">""")
         for title, b64 in flux_imgs:
             H.append(f'<div class="lbl" style="margin:6px 0">{esc(title)}</div>'
                      f'<img class="flux" src="data:image/png;base64,{b64}">')
@@ -1036,7 +1384,7 @@ def build_html(meteors, flux_imgs, gen_time, fragment=False):
                  f'원본: <a href="{FLUX_PAGE}" target="_blank">globalmeteornetwork.org/flux</a></div></div>')
 
     # 실시간으로 보는 곳
-    H.append(f"""<h2>⑧ 지금 이 순간을 보고 싶다면</h2><div class="card">
+    H.append(f"""<h2>⑩ 지금 이 순간을 보고 싶다면</h2><div class="card">
 <table>
 <tr><th>사이트</th><th>방식</th><th>실시간성</th></tr>
 <tr><td><a href="https://livemeteors.com/" target="_blank">LiveMeteors.com</a></td>
