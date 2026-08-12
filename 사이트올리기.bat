@@ -44,6 +44,8 @@ git commit -q -m "유성현황 갱신"
 
 echo.
 echo [3/3] 인터넷에 올리는 중...
+echo   (자동 갱신분이 있으면 먼저 받아옵니다)
+git pull --rebase --autostash -q
 echo   (처음이면 브라우저가 열립니다 - 깃허브 로그인하고 승인해 주세요)
 git push -u origin main
 if errorlevel 1 goto PUSHFAIL
