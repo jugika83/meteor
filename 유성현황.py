@@ -929,7 +929,8 @@ def build_html(meteors, flux_imgs, gen_time, fragment=False):
              '오늘 밤 몇 시에 어디로 가면 잘 보이는지 알려드립니다.</div></div>')
 
     # 도시별 내용이 그려질 자리
-    H.append(f'<div id="report" data-night-label="{today:%m월 %d일}" hidden></div>')
+    H.append(f'<div id="report" data-night-label="{today:%m월 %d일}"'
+             f'{" data-nowx=\"1\"" if fragment else ""} hidden></div>')
 
     # 도시별 계산 결과를 통째로 심어둔다 (클릭하면 즉시 전환, 인터넷 불필요)
     payload = json.dumps(reports, ensure_ascii=False).replace("</", "<\\/")
@@ -1191,7 +1192,7 @@ def build_html(meteors, flux_imgs, gen_time, fragment=False):
   }
 
   function loadWx(d){
-    if (!d.spots || !d.spots.wx || !window.MeteorWx) return;
+    if (out.dataset.nowx || !d.spots || !d.spots.wx || !window.MeteorWx) return;
     var mine = CUR;
     window.MeteorWx.load(d.spots.wx).then(function(list){
       if (CUR !== mine) return;                 // 그새 다른 도시를 눌렀으면 무시
@@ -1220,7 +1221,7 @@ def build_html(meteors, flux_imgs, gen_time, fragment=False):
         '<td class="r">' + c.date + '</td><td class="r">' + dd + '</td>' +
         '<td class="r">시간당 ' + c.zhr + '개</td></tr>';
     }).join('');
-    return '<h2>④ 다음 유성우는 언제</h2><div class="card"><table>' +
+    return '<h2>' + (out.dataset.nowx ? '③' : '④') + ' 다음 유성우는 언제</h2><div class="card"><table>' +
       '<tr><th>유성우</th><th class="r">극대일</th><th class="r">남은 날</th><th class="r">최대 활동량</th></tr>' +
       rows + '</table><div class="note">최대 활동량은 하늘이 완벽할 때의 이론값(ZHR)입니다. ' +
       '도시에서는 이보다 훨씬 적게 보이고, 달이 밝으면 더 줄어듭니다.</div></div>';
@@ -1236,10 +1237,11 @@ def build_html(meteors, flux_imgs, gen_time, fragment=False):
       '<b style="color:#ffd166;font-size:20px">' + esc(d.banner.title) + '</b><br>' +
       d.banner.sub + '</div>');
 
-    h.push(wxSkeleton());
+    if (!out.dataset.nowx) h.push(wxSkeleton());
 
     var nt = d.night;
-    h.push('<h2>② 오늘 밤 ' + esc(d.place) + ' 하늘 시간표 · ' + NIGHT + ' 밤</h2>' +
+    h.push('<h2>' + (out.dataset.nowx ? '①' : '②') + ' 오늘 밤 ' + esc(d.place) +
+      ' 하늘 시간표 · ' + NIGHT + ' 밤</h2>' +
       '<div class="card"><div class="grid g4">' +
       '<div><div class="lbl">일몰</div><div class="big">' + nt.sunset + '</div></div>' +
       '<div><div class="lbl">완전히 어두워짐(천문박명 끝)</div><div class="big">' + nt.dusk + '</div></div>' +
@@ -1260,7 +1262,7 @@ def build_html(meteors, flux_imgs, gen_time, fragment=False):
 
     var sp = d.spots;
     if (sp) {
-      h.push('<h2>③ 어디로 가면 어두운가 — ' + esc(d.place) + ' 기준</h2>' +
+      h.push('<h2>' + (out.dataset.nowx ? '②' : '③') + ' 어디로 가면 어두운가 — ' + esc(d.place) + ' 기준</h2>' +
         '<div class="card"><div class="grid g4">' +
         '<div><div class="lbl">지금 계신 곳(' + esc(d.place) + ') 하늘</div>' +
         '<div class="big">' + sp.homeHr + '개<span style="font-size:15px">/시간</span></div>' +
