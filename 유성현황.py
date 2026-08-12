@@ -47,9 +47,38 @@ FLUX_PAGE = GMN_BASE + "/flux/"
 LAND_URL  = ("https://raw.githubusercontent.com/nvkelso/natural-earth-vector"
              "/master/geojson/ne_110m_land.geojson")
 
-# 관측지 기본값(서울시청)
+# 관측지 — 같은 폴더의 '관측지.txt' 로 고정한다. 파일이 없으면 서울, 명령줄 옵션이 최우선.
 LAT, LON, PLACE = 37.5665, 126.9780, "서울"
 NOCACHE = False
+PLACE_FILE = os.path.join(HERE, "관측지.txt")
+
+
+def load_place():
+    """관측지.txt 읽기. 없으면 기본값 그대로. (한 번 정해두면 매번 옵션 안 써도 된다)"""
+    global LAT, LON, PLACE
+    if not os.path.exists(PLACE_FILE):
+        return False
+    try:
+        for enc in ("utf-8-sig", "cp949"):
+            try:
+                body = open(PLACE_FILE, encoding=enc).read(); break
+            except UnicodeDecodeError:
+                continue
+        for line in body.splitlines():
+            line = line.split("#")[0].strip()
+            if "=" not in line:
+                continue
+            k, v = [x.strip() for x in line.split("=", 1)]
+            if k in ("장소", "place") and v:
+                PLACE = v
+            elif k in ("위도", "lat"):
+                LAT = float(v)
+            elif k in ("경도", "lon"):
+                LON = float(v)
+        return True
+    except Exception as e:
+        print(f"  (관측지.txt 를 읽지 못해 기본값으로 진행합니다: {e})")
+        return False
 
 # IAU 유성우 코드 → 한글 이름 (확실한 것만. 없는 코드는 코드 그대로 표기)
 SHOWER_KO = {
@@ -925,6 +954,7 @@ def build_html(meteors, flux_imgs, gen_time, fragment=False):
 def main():
     global LAT, LON, PLACE, NOCACHE
     a = sys.argv[1:]
+    from_file = load_place()                       # ① 관측지.txt
     if "--nocache" in a:
         NOCACHE = True
     for k, setter in (("--lat", "lat"), ("--lon", "lon"), ("--place", "place")):
@@ -934,7 +964,9 @@ def main():
             elif setter == "lon": LON = float(v)
             else: PLACE = v
 
-    print(f"유성현황 생성 — 관측지 {PLACE} ({LAT}, {LON})")
+    overridden = any(k in a for k in ("--lat", "--lon", "--place"))
+    tag = "  [이번만 옵션으로 지정]" if overridden else ("  [관측지.txt 고정]" if from_file else "")
+    print(f"유성현황 생성 — 관측지 {PLACE} ({LAT}, {LON}){tag}")
     texts = [cached(f"{GMN_BASE}/data/traj_summary_data/daily/{n}", n) for n in GMN_FILES]
     meteors = parse_gmn(texts)
     if not meteors:
